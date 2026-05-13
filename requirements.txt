@@ -1,0 +1,6 @@
+carla==0.9.15
+numpy==1.24.4
+opencv-python==4.8.0.76
+matplotlib==3.7.2
+open3d==0.17.0
+Pillow==10.0.0
