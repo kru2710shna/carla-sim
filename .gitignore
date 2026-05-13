@@ -220,3 +220,4 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 >>>>>>> dd7f0f91ddace2edd259a838586b15b6ddfeeccd
+venv/
