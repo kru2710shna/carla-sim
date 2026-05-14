@@ -2,6 +2,7 @@ import time
 from utils.helper import is_carla_there, get_world, spawn_vehicle, focus_spectator_on
 from sensors.camera import attach_rgb_camera
 from sensors.gnss import attach_gnss,stop_gnss
+from sensors.lidar import attach_lidar
 
 def main():
     # step 1 - check CARLA is running
@@ -29,10 +30,11 @@ def main():
     # step 5 - attach RGB camera , gnss to vehicle
     camera = attach_rgb_camera(world, vehicle)
     gnss = attach_gnss(world,vehicle)
+    lidar  = attach_lidar(world, vehicle)
 
     # step 5.1 add a time so it can adjust sensor 
     time.sleep(3)
-    
+
     # step 6 - let it run for 10 seconds and collect frames
     print("Collecting data for 60 seconds...")
     time.sleep(60)
@@ -42,8 +44,10 @@ def main():
     camera.stop()
     camera.destroy()
     stop_gnss(gnss)
+    lidar.stop()
+    lidar.destroy()
     vehicle.destroy()
-    print("Done. Check data/images/ and data/gnss for saved frames.")
+    print("Done. Check data/images/ , data/gnss and data/lidar for saved frames.")
 
 if __name__ == "__main__":
     main()
