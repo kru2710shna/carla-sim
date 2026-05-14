@@ -30,9 +30,12 @@ def main():
     camera = attach_rgb_camera(world, vehicle)
     gnss = attach_gnss(world,vehicle)
 
+    # step 5.1 add a time so it can adjust sensor 
+    time.sleep(3)
+    
     # step 6 - let it run for 10 seconds and collect frames
-    print("Collecting data for 10 seconds...")
-    time.sleep(30)
+    print("Collecting data for 60 seconds...")
+    time.sleep(60)
 
     # step 7 - clean up, always destroy sensors and vehicles after
     print("Cleaning up...")

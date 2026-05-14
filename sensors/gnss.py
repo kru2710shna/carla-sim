@@ -12,7 +12,7 @@ def attach_gnss(world,vehicle,save_path='data/gnss'):
     gnss_bp = blueprint_lib.find('sensor.other.gnss')
 
     # 3- record time interval
-    gnss_bp.set_attribute("sensor_tick",'0.1')
+    gnss_bp.set_attribute("sensor_tick",'0.05')
 
     # 4- mount on top ot camera
     gnss_transform = carla.Transform(carla.Location(x=0,z=2.0))
