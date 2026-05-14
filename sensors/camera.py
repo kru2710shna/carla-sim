@@ -1,7 +1,7 @@
 import carla
 import os
 
-def rgb_camera(world, vehicle, save_path="data/images"):
+def attach_rgb_camera(world, vehicle, save_path="data/images"):
     """
     Attaches an RGB camera to a vehicle and saves images to disk.
 
