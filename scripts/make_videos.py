@@ -5,20 +5,22 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def make_video(session_path, fps=20):
-    """
-    Converts RGB frames from a session into an MP4 video.
-    """
-    images_path = os.path.join(session_path, "images")
-    output_path = os.path.join(session_path, "rgb_video.mp4")
 
-    frames = sorted(glob.glob(os.path.join(images_path, "frame_*.png")))
+def make_video(session_path, fps=20):
+    # check both old and new folder structure
+    for images_path in [
+        os.path.join(session_path, "camera/front"),
+        os.path.join(session_path, "images")
+    ]:
+        frames = sorted(glob.glob(os.path.join(images_path, "*.png")))
+        if frames:
+            break
 
     if not frames:
-        print(f"No frames found in {images_path}")
+        print(f"No frames found in {session_path}")
         return
 
-    # get dimensions from first frame
+    output_path = os.path.join(session_path, "rgb_video.mp4")
     sample = cv2.imread(frames[0])
     h, w   = sample.shape[:2]
 
@@ -38,19 +40,19 @@ def make_video(session_path, fps=20):
 
 
 if __name__ == "__main__":
-    # find all sessions
-    sessions = sorted([
-        os.path.join("Data", d)
-        for d in os.listdir("Data")
-        if d.startswith("session_") and os.path.isdir(os.path.join("Data", d))
-    ])
+    sessions = []
+    for base in ["data", "Data"]:
+        if os.path.exists(base):
+            for d in sorted(os.listdir(base)):
+                full = os.path.join(base, d)
+                if d.startswith("session_") and os.path.isdir(full):
+                    sessions.append(full)
 
     if not sessions:
-        print("No sessions found in Data/")
+        print("No sessions found in data/ or Data/")
         sys.exit(1)
 
     print(f"Found {len(sessions)} sessions\n")
-
     for session in sessions:
         make_video(session)
 

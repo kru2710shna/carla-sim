@@ -15,7 +15,7 @@ PRESETS = {
         ),
         "traffic": 3,
         "pedestrians": 5,
-        "duration": 120,
+        "duration": 240,
         "description": "Clear Day, Light Traffic, Full Visibility"
     },
 

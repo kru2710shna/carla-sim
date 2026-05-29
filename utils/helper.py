@@ -1,120 +1,183 @@
 import carla
 import random
 
-def is_carla_there(host="localhost", port=2000, timeout=5.0):
+
+def connect(host="localhost", port=2000, timeout=60.0):
+    """Connect to CARLA and return client + world."""
+    client = carla.Client(host, port)
+    client.set_timeout(timeout)
+    world = client.get_world()
+    print(f"Connected: {world.get_map().name}")
+    return client, world
+
+
+def set_sync_mode(world, delta=0.05):
+    """Enable synchronous mode. Returns original settings for restore."""
+    original = world.get_settings()
+    settings = world.get_settings()
+    settings.synchronous_mode    = True
+    settings.fixed_delta_seconds = delta
+    world.apply_settings(settings)
+    print(f"Sync mode ON ({int(1/delta)} FPS)")
+    return original
+
+
+def restore_async_mode(world, original_settings):
+    """Restore original async settings."""
     try:
-        client = carla.Client(host, port)
-        client.set_timeout(timeout)
-        client.get_server_version()
-        return True
+        world.apply_settings(original_settings)
+        print("Async mode restored")
     except Exception:
-        return False
+        pass
 
-def get_world(host="localhost", port=2000, timeout=5.0):
-    try:
-        client = carla.Client(host, port)
-        client.set_timeout(timeout)
-        return client.get_world()
-    except Exception as e:
-        print(f"Failed to get world: {e}")
-        return None
 
-def spawn_vehicle(world):
-    blueprint_library = world.get_blueprint_library()
-    vehicle_bp = blueprint_library.filter('vehicle.tesla.model3')[0]
-    vehicle_bp.set_attribute('role_name', 'ego')
+def spawn_ego(world, spawn_index):
+    """Spawn Tesla Model3 at a fixed spawn point."""
+    bp_lib    = world.get_blueprint_library()
+    vehicle_bp = bp_lib.find('vehicle.tesla.model3')
+    vehicle_bp.set_attribute('role_name', 'hero')
+    sp = world.get_map().get_spawn_points()[spawn_index]
+    vehicle = world.try_spawn_actor(vehicle_bp, sp)
+    if vehicle:
+        print(f"Ego spawned at spawn[{spawn_index}] "
+              f"x={sp.location.x:.1f} y={sp.location.y:.1f}")
+    else:
+        raise RuntimeError(f"Failed to spawn ego at spawn[{spawn_index}]")
+    return vehicle
+
+
+def spawn_npc_vehicles(client, world, count=10):
+    """
+    Spawn NPC vehicles at spawn points NOT on our route.
+    Avoids collision with ego vehicle at route waypoints.
+    """
+    from config.route import LOOP_ROUTE
+    route_indices = set(LOOP_ROUTE["spawn_indices"])
+
+    bp_lib = world.get_blueprint_library()
+    vehicle_bps = [
+        bp for bp in bp_lib.filter('vehicle.*')
+        if bp.get_attribute('number_of_wheels').as_int() == 4
+    ]
 
     spawn_points = world.get_map().get_spawn_points()
-    random.shuffle(spawn_points)
+    # only use spawn points NOT on our route
+    safe_spawns = [
+        sp for i, sp in enumerate(spawn_points)
+        if i not in route_indices
+    ]
+    random.shuffle(safe_spawns)
 
-    # try each spawn point until one works
-    for spawn_point in spawn_points:
-        vehicle = world.try_spawn_actor(vehicle_bp, spawn_point)
-        if vehicle:
-            print(f"Spawned: {vehicle.type_id} at {spawn_point.location}")
-            return vehicle
-
-    print("Failed to spawn ego vehicle — all spawn points occupied")
-    return None
-
-
-def configure_npc_traffic(client, actors, ego_vehicle=None):
     tm = client.get_trafficmanager()
+    tm.set_synchronous_mode(True)
     tm.set_global_distance_to_leading_vehicle(3.0)
 
-    for actor in actors:
-        if actor.type_id.startswith('vehicle.'):
-            try:
-                tm.vehicle_percentage_speed_difference(actor, 30.0)
-                tm.auto_lane_change(actor, False)
-                tm.ignore_lights_percentage(actor, 0)
-            except Exception:
-                pass
-
-    # configure ego separately
-    if ego_vehicle:
-        tm.vehicle_percentage_speed_difference(ego_vehicle, 40.0)
-        tm.auto_lane_change(ego_vehicle, False)
-        tm.keep_right_rule_percentage(ego_vehicle, 100)
-        tm.distance_to_leading_vehicle(ego_vehicle, 5.0)
-
-    print("NPC traffic configured for safe driving")
-
-    
-def focus_spectator_on(world, actor):
-    spectator = world.get_spectator()
-    transform = actor.get_transform()
-    transform.location.z += 30
-    transform.rotation.pitch = -90
-    spectator.set_transform(transform)
-    print("Spectator focused on vehicle")
-
-
-def spawn_traffic(world, num_vehicles=30, num_pedestrians=20):
     actors = []
-    blueprint_lib = world.get_blueprint_library()
-
-    # add vehciles 
-    vehicle_bp = blueprint_lib.filter("vehicle.*")
-    spawn_point = world.get_map().get_spawn_points()
-    random.shuffle(spawn_point)
-
-    for i , spawn_p in enumerate(spawn_point[:num_vehicles]):
-        bp = random.choice(vehicle_bp)
-
-        # skip bike and cycles, as they are hard to track
-        if 'bike' in bp.id or 'bicycle' in bp.id or 'motorcycle' in bp.id:
-            continue
-        
-        actor = world.try_spawn_actor(bp, spawn_p)
+    for sp in safe_spawns[:count]:
+        bp    = random.choice(vehicle_bps)
+        actor = world.try_spawn_actor(bp, sp)
         if actor:
-            actor.set_autopilot(True)   # every NPC drives itself
+            actor.set_autopilot(True, tm.get_port())
             actors.append(actor)
-    print(f"Spawned {len(actors)} NPC vehicles")
 
-
-    # add pedestrians 
-    pedestrians_bp = blueprint_lib.filter("walker.pedestrian.*")
-    ped_controller_bp = blueprint_lib.find('controller.ai.walker')
-
-    SPWAN_POINTS = []
-    for _ in range(num_pedestrians):
-        loc = world.get_random_location_from_navigation()
-        if loc:
-            SPWAN_POINTS.append(carla.Transform(loc))
-    
-    for sp in SPWAN_POINTS:
-        ped_bp = random.choice(pedestrians_bp)
-        pedestrian = world.try_spawn_actor(ped_bp, sp)
-        if pedestrian:
-            actors.append(pedestrian)
-
-            # attach AI controller so pedestrian walks around
-            controller = world.spawn_actor(ped_controller_bp, carla.Transform(), attach_to=pedestrian)
-            controller.start()
-            controller.go_to_location(world.get_random_location_from_navigation())
-            controller.set_max_speed(1.4)   
-            actors.append(controller)
-
-    print(f"Spawned pedestrians")
+    world.tick()
+    print(f"Spawned {len(actors)} NPC vehicles (off-route)")
     return actors
+
+
+def spawn_pedestrians(world, count=10):
+    """Spawn pedestrians at random navigation points."""
+    bp_lib         = world.get_blueprint_library()
+    walker_bps     = bp_lib.filter('walker.pedestrian.*')
+    controller_bp  = bp_lib.find('controller.ai.walker')
+
+    ped_actors  = []
+    ctrl_actors = []
+
+    for _ in range(count):
+        loc = world.get_random_location_from_navigation()
+        if not loc:
+            continue
+        bp = random.choice(walker_bps)
+        if bp.has_attribute('is_invincible'):
+            bp.set_attribute('is_invincible', 'false')
+        actor = world.try_spawn_actor(bp, carla.Transform(loc))
+        if actor:
+            ped_actors.append(actor)
+
+    world.tick()
+
+    for ped in ped_actors:
+        ctrl = world.try_spawn_actor(
+            controller_bp,
+            carla.Transform(),
+            attach_to=ped
+        )
+        if ctrl:
+            ctrl_actors.append(ctrl)
+
+    world.tick()
+
+    for ctrl in ctrl_actors:
+        ctrl.start()
+        dest = world.get_random_location_from_navigation()
+        if dest:
+            ctrl.go_to_location(dest)
+        ctrl.set_max_speed(1.4)
+
+    print(f"Spawned {len(ped_actors)} pedestrians")
+    return ped_actors + ctrl_actors
+
+
+def cleanup(world, original_settings, sensors, actors, vehicle):
+    """
+    Full cleanup — always runs via try/finally.
+    Order: restore settings → stop sensors →
+           close files → destroy sensors →
+           stop controllers → destroy actors → destroy ego
+    """
+    print("Cleaning up...")
+    restore_async_mode(world, original_settings)
+
+    for s in sensors:
+        try:
+            if s and s.is_alive:
+                s.stop()
+        except Exception:
+            pass
+
+    for s in sensors:
+        try:
+            if hasattr(s, '_csv_file'):
+                s._csv_file.close()
+        except Exception:
+            pass
+
+    for s in sensors:
+        try:
+            if s and s.is_alive:
+                s.destroy()
+        except Exception:
+            pass
+
+    for a in actors:
+        try:
+            if a and a.is_alive and 'controller' in a.type_id:
+                a.stop()
+        except Exception:
+            pass
+
+    for a in actors:
+        try:
+            if a and a.is_alive:
+                a.destroy()
+        except Exception:
+            pass
+
+    try:
+        if vehicle and vehicle.is_alive:
+            vehicle.destroy()
+    except Exception:
+        pass
+
+    print("Cleanup complete.")

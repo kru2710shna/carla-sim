@@ -1,0 +1,14 @@
+{
+    "scenario": "baseline",
+    "description": "Clear Day, Light Traffic, Full Visiblity",
+    "map": "Carla/Maps/Town10HD_Opt",
+    "traffic": 3,
+    "pedestrians": 5,
+    "duration_seconds": 60,
+    "sensor_config": {
+        "camera": "1920x1080, fov=105, sensor_tick=0.05",
+        "lidar": "32ch, range=50m, 100k pts/sec",
+        "gnss": "tick=0.05s"
+    },
+    "timestamp": "2026-05-17 05:56:39"
+}
