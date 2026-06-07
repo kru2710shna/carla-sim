@@ -3,12 +3,12 @@ import carla
 PRESETS = {
     "baseline": {
         "weather": carla.WeatherParameters(
-            cloudiness=10.0,
+            cloudiness=15.0,
             precipitation=0.0,
             precipitation_deposits=0.0,
             wind_intensity=5.0,
-            sun_azimuth_angle=45.0,
-            sun_altitude_angle=70,
+            sun_azimuth_angle=200.0,   # move sun BEHIND the car
+            sun_altitude_angle=45.0,   # lower sun angle
             fog_density=0.0,
             fog_distance=0.0,
             wetness=0.0
