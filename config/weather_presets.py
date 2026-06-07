@@ -13,9 +13,9 @@ PRESETS = {
             fog_distance=0.0,
             wetness=0.0
         ),
-        "traffic": 3,
-        "pedestrians": 5,
-        "duration": 240,
+        "traffic": 20,
+        "pedestrians": 15,
+        "duration": 160,
         "description": "Clear Day, Light Traffic, Full Visibility"
     },
 

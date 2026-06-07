@@ -46,10 +46,10 @@ def spawn_ego(world, spawn_index):
     return vehicle
 
 
-def spawn_npc_vehicles(client, world, count=10):
+def spawn_npc_vehicles(client, world, count=20):
     """
-    Spawn NPC vehicles at spawn points NOT on our route.
-    Avoids collision with ego vehicle at route waypoints.
+    Batch spawn NPC vehicles at spawn points NOT on our route.
+    Batch spawning is more memory efficient than individual spawns.
     """
     from config.route import LOOP_ROUTE
     route_indices = set(LOOP_ROUTE["spawn_indices"])
@@ -61,39 +61,50 @@ def spawn_npc_vehicles(client, world, count=10):
     ]
 
     spawn_points = world.get_map().get_spawn_points()
-    # only use spawn points NOT on our route
-    safe_spawns = [
+    safe_spawns  = [
         sp for i, sp in enumerate(spawn_points)
         if i not in route_indices
     ]
     random.shuffle(safe_spawns)
 
-    tm = client.get_trafficmanager()
+    tm      = client.get_trafficmanager()
+    tm_port = tm.get_port()
+    tm.set_global_distance_to_leading_vehicle(2.5)
     tm.set_synchronous_mode(True)
-    tm.set_global_distance_to_leading_vehicle(3.0)
 
-    actors = []
+    # batch spawn — much lighter on memory
+    batch = []
     for sp in safe_spawns[:count]:
-        bp    = random.choice(vehicle_bps)
-        actor = world.try_spawn_actor(bp, sp)
-        if actor:
-            actor.set_autopilot(True, tm.get_port())
-            actors.append(actor)
+        bp = random.choice(vehicle_bps)
+        batch.append(
+            carla.command.SpawnActor(bp, sp)
+            .then(carla.command.SetAutopilot(
+                carla.command.FutureActor, True, tm_port))
+        )
 
-    world.tick()
-    print(f"Spawned {len(actors)} NPC vehicles (off-route)")
+    results = client.apply_batch_sync(batch, True)
+    actors  = [
+        world.get_actor(r.actor_id)
+        for r in results
+        if not r.error
+    ]
+
+    print(f"Batch spawned {len(actors)} NPC vehicles (off-route)")
     return actors
 
 
-def spawn_pedestrians(world, count=10):
-    """Spawn pedestrians at random navigation points."""
-    bp_lib         = world.get_blueprint_library()
-    walker_bps     = bp_lib.filter('walker.pedestrian.*')
-    controller_bp  = bp_lib.find('controller.ai.walker')
+def spawn_pedestrians(world, count=15):
+    """
+    Spawn pedestrians at random navigation points.
+    """
+    bp_lib        = world.get_blueprint_library()
+    walker_bps    = bp_lib.filter('walker.pedestrian.*')
+    controller_bp = bp_lib.find('controller.ai.walker')
 
     ped_actors  = []
     ctrl_actors = []
 
+    # spawn pedestrian bodies
     for _ in range(count):
         loc = world.get_random_location_from_navigation()
         if not loc:
@@ -107,6 +118,7 @@ def spawn_pedestrians(world, count=10):
 
     world.tick()
 
+    # attach AI controllers
     for ped in ped_actors:
         ctrl = world.try_spawn_actor(
             controller_bp,
@@ -118,6 +130,7 @@ def spawn_pedestrians(world, count=10):
 
     world.tick()
 
+    # start walking
     for ctrl in ctrl_actors:
         ctrl.start()
         dest = world.get_random_location_from_navigation()
@@ -125,9 +138,9 @@ def spawn_pedestrians(world, count=10):
             ctrl.go_to_location(dest)
         ctrl.set_max_speed(1.4)
 
+    all_actors = ped_actors + ctrl_actors
     print(f"Spawned {len(ped_actors)} pedestrians")
-    return ped_actors + ctrl_actors
-
+    return all_actors
 
 def cleanup(world, original_settings, sensors, actors, vehicle):
     """

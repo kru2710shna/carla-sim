@@ -7,10 +7,10 @@ def attach_lidar(world, vehicle, save_path="data/lidar"):
 
     bp_lib   = world.get_blueprint_library()
     lidar_bp = bp_lib.find('sensor.lidar.ray_cast')
-    lidar_bp.set_attribute('channels',          '32')
+    lidar_bp.set_attribute('channels',           '16')
+    lidar_bp.set_attribute('points_per_second',  '50000')
+    lidar_bp.set_attribute('rotation_frequency', '20')
     lidar_bp.set_attribute('range',             '50')
-    lidar_bp.set_attribute('points_per_second', '100000')
-    lidar_bp.set_attribute('rotation_frequency','10')
     lidar_bp.set_attribute('upper_fov',         '10')
     lidar_bp.set_attribute('lower_fov',         '-30')
 

@@ -265,6 +265,12 @@ def run(route_name, scenario_name):
         tick_count = 0
         max_ticks  = int(preset["duration"] / 0.05)  # duration in ticks
 
+        settings = world.get_settings()
+        settings.synchronous_mode    = True
+        settings.fixed_delta_seconds = 0.05
+        world.apply_settings(settings)
+
+        
         while tick_count < max_ticks:
             world.tick()
             tick_count += 1

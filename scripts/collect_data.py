@@ -10,42 +10,14 @@ sys.path.append('/home/tmpadmin/Downloads/CARLA_0.9.15/PythonAPI/carla')
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.navigation.behavior_agent import BehaviorAgent
-from config.route          import LOOP_ROUTE
-from config.weather_presets import PRESETS
-from utils.helper          import (
-    connect, set_sync_mode, spawn_ego,
-    spawn_npc_vehicles, spawn_pedestrians, cleanup
-)
+from config.route            import LOOP_ROUTE
+from config.weather_presets  import PRESETS
+from utils.helper            import connect, spawn_ego, spawn_npc_vehicles, spawn_pedestrians, cleanup
 from sensors.camera import attach_rgb_camera
 from sensors.gnss   import attach_gnss
 from sensors.lidar  import attach_lidar
 from sensors.radar  import attach_radar
 
-import json
-
-annotations = []
-
-def log_frame(vehicle, frame, timestamp):
-    """Log ego pose for every frame — goes into annotations.json"""
-    t = vehicle.get_transform()
-    v = vehicle.get_velocity()
-    annotations.append({
-        "frame":     frame,
-        "timestamp": timestamp,
-        "ego_pose": {
-            "x":     t.location.x,
-            "y":     t.location.y,
-            "z":     t.location.z,
-            "yaw":   t.rotation.yaw,
-            "pitch": t.rotation.pitch,
-            "roll":  t.rotation.roll
-        },
-        "ego_velocity": {
-            "vx": v.x,
-            "vy": v.y,
-            "vz": v.z
-        }
-    })
 
 def create_session(scenario_name, base="data"):
     os.makedirs(base, exist_ok=True)
@@ -56,10 +28,8 @@ def create_session(scenario_name, base="data"):
     num  = len(existing) + 1
     name = f"session_{num:03d}_{scenario_name}"
     path = os.path.join(base, name)
-
     for sub in ["camera/front", "lidar", "radar", "gnss"]:
         os.makedirs(os.path.join(path, sub), exist_ok=True)
-
     print(f"Session: {path}")
     return path
 
@@ -73,11 +43,37 @@ def save_metadata(path, scenario, preset):
         "traffic":     preset["traffic"],
         "pedestrians": preset["pedestrians"],
         "duration":    preset["duration"],
+        "sync_mode":   True,
+        "fps":         20,
         "sensors": {
-            "camera": "1280x720 fov=90 x=1.5 z=2.4",
-            "lidar":  "32ch range=50m 100kpts/s",
-            "radar":  "fov=30x10 range=100m",
-            "gnss":   "tick=0.05s"
+            "camera_front": {
+                "type":       "sensor.camera.rgb",
+                "resolution": [1280, 720],
+                "fov":        90,
+                "mount":      {"x": 1.5, "y": 0.0, "z": 2.4,
+                               "pitch": 0, "yaw": 0, "roll": 0}
+            },
+            "lidar": {
+                "type":                "sensor.lidar.ray_cast",
+                "channels":            16,
+                "range":               50,
+                "points_per_second":   50000,
+                "rotation_frequency":  20,
+                "mount":               {"x": 0.0, "y": 0.0, "z": 2.8,
+                                        "pitch": 0, "yaw": 0, "roll": 0}
+            },
+            "radar": {
+                "type":           "sensor.other.radar",
+                "horizontal_fov": 30,
+                "vertical_fov":   10,
+                "range":          100,
+                "mount":          {"x": 2.0, "y": 0.0, "z": 1.0,
+                                   "pitch": 5, "yaw": 0, "roll": 0}
+            },
+            "gnss": {
+                "type":  "sensor.other.gnss",
+                "mount": {"x": 0.0, "y": 0.0, "z": 2.0}
+            }
         },
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -100,13 +96,20 @@ def run(scenario_name):
     original_settings = world.get_settings()
     spawn_points      = world.get_map().get_spawn_points()
 
-    vehicle = None
-    sensors = []
-    actors  = []
+    vehicle     = None
+    sensors     = []
+    actors      = []
+    annotations = []
 
     try:
-        # 1. sync mode
-        set_sync_mode(world, delta=0.05)
+        # 1. sync mode ON
+        settings = world.get_settings()
+        settings.synchronous_mode    = True
+        settings.fixed_delta_seconds = 0.05   # 20 FPS
+        world.apply_settings(settings)
+        tm = client.get_trafficmanager()
+        tm.set_synchronous_mode(True)
+        print("Sync mode ON (20 FPS)")
 
         # 2. set weather
         world.set_weather(preset["weather"])
@@ -117,22 +120,18 @@ def run(scenario_name):
         vehicle = spawn_ego(world, LOOP_ROUTE["start_index"])
         world.tick()
 
-        # 4. BehaviorAgent — drives the fixed loop
-        agent = BehaviorAgent(vehicle, behavior='normal')
-
-        # set first destination — next point in loop
+        # 4. BehaviorAgent
+        agent = BehaviorAgent(vehicle, behavior='aggressive')
+        agent.ignore_traffic_lights(active=True)
         next_dest = spawn_points[LOOP_ROUTE["spawn_indices"][1]].location
         agent.set_destination(next_dest)
-        print("BehaviorAgent ready")
+        print("BehaviorAgent ready (aggressive, ignores lights)")
 
-        # 5. spawn traffic OFF the route
-        actors = spawn_npc_vehicles(
-            client, world,
-            count=preset["traffic"]
-        )
+        # 5. spawn traffic off-route
+        actors  = spawn_npc_vehicles(client, world, count=preset["traffic"])
         actors += spawn_pedestrians(world, count=preset["pedestrians"])
 
-        # 6. attach all sensors
+        # 6. attach all 4 sensors
         camera = attach_rgb_camera(world, vehicle,
                     save_path=os.path.join(session_path, "camera/front"))
         gnss   = attach_gnss(world, vehicle,
@@ -143,40 +142,54 @@ def run(scenario_name):
                     save_path=os.path.join(session_path, "radar"))
         sensors = [camera, gnss, lidar, radar]
 
-        # 7. warmup
+        # 7. warmup — let sensors initialise
         print("Warming up (60 ticks)...")
         for _ in range(60):
             world.tick()
 
-        # 8. main loop — follow route waypoints in order
+        # 8. main sync loop
         print(f"Recording for {preset['duration']}s...")
-        max_ticks    = int(preset["duration"] / 0.05)
-        tick_count   = 0
-        route_idx    = 1   # current target waypoint index in loop
+        max_ticks  = int(preset["duration"] / 0.05)
+        tick_count = 0
+        route_idx  = 1
 
         while tick_count < max_ticks:
             world.tick()
             tick_count += 1
 
-            # check if agent reached current destination
+            # advance agent to next waypoint when current is reached
             if agent.done():
-                route_idx += 1
-                if route_idx >= len(LOOP_ROUTE["spawn_indices"]):
-                    route_idx = 0   # loop back to start
-
-                next_sp = spawn_points[
-                    LOOP_ROUTE["spawn_indices"][route_idx]
-                ]
+                route_idx = (route_idx + 1) % len(LOOP_ROUTE["spawn_indices"])
+                next_sp   = spawn_points[LOOP_ROUTE["spawn_indices"][route_idx]]
                 agent.set_destination(next_sp.location)
-                print(f"  → next waypoint: "
-                      f"spawn[{LOOP_ROUTE['spawn_indices'][route_idx]}]")
+                print(f"  → waypoint: spawn[{LOOP_ROUTE['spawn_indices'][route_idx]}]")
 
-            snap = world.get_snapshot()
-            log_frame(vehicle, snap.frame, snap.timestamp.elapsed_seconds)
+            # agent drives
             control = agent.run_step()
             vehicle.apply_control(control)
 
-            if tick_count % 200 == 0:
+            # log ego pose every tick
+            t = vehicle.get_transform()
+            v = vehicle.get_velocity()
+            annotations.append({
+                "frame":     tick_count,
+                "timestamp": round(tick_count * 0.05, 3),
+                "ego_pose": {
+                    "x":     t.location.x,
+                    "y":     t.location.y,
+                    "z":     t.location.z,
+                    "yaw":   t.rotation.yaw,
+                    "pitch": t.rotation.pitch,
+                    "roll":  t.rotation.roll
+                },
+                "ego_velocity": {
+                    "vx": v.x,
+                    "vy": v.y,
+                    "vz": v.z
+                }
+            })
+
+            if tick_count % 400 == 0:
                 loc = vehicle.get_location()
                 print(f"  tick {tick_count}/{max_ticks} | "
                       f"x={loc.x:.1f} y={loc.y:.1f}")
@@ -194,7 +207,7 @@ def run(scenario_name):
         print(f"Annotations saved: {len(annotations)} frames")
 
         cleanup(world, original_settings, sensors, actors, vehicle)
-
+        print(f"Done → {session_path}")
 
 
 if __name__ == "__main__":
@@ -206,6 +219,6 @@ if __name__ == "__main__":
             print(f"SCENARIO: {scenario.upper()}")
             print(f"{'='*60}")
             subprocess.run([sys.executable, __file__, scenario])
-            print("Waiting 10s...")
-            time.sleep(10)
+            print("Waiting 15s before next scenario...")
+            time.sleep(15)
         print("\nALL SCENARIOS COMPLETE!")
