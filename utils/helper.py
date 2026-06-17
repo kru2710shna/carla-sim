@@ -92,55 +92,62 @@ def spawn_npc_vehicles(client, world, count=20):
     print(f"Batch spawned {len(actors)} NPC vehicles (off-route)")
     return actors
 
-
-def spawn_pedestrians(world, count=15):
+def spawn_pedestrians(world, client, count=15):
     """
-    Spawn pedestrians at random navigation points.
+    Spawn pedestrians using batch commands — more reliable in sync mode.
     """
     bp_lib        = world.get_blueprint_library()
     walker_bps    = bp_lib.filter('walker.pedestrian.*')
     controller_bp = bp_lib.find('controller.ai.walker')
 
-    ped_actors  = []
-    ctrl_actors = []
-
-    # spawn pedestrian bodies
-    for _ in range(count):
+    # 1. find valid spawn locations from navigation mesh
+    spawn_transforms = []
+    for _ in range(count * 3):          # try 3x to account for failures
         loc = world.get_random_location_from_navigation()
-        if not loc:
-            continue
+        if loc:
+            spawn_transforms.append(carla.Transform(loc))
+        if len(spawn_transforms) >= count:
+            break
+
+    # 2. batch spawn pedestrian bodies
+    batch = []
+    for trans in spawn_transforms:
         bp = random.choice(walker_bps)
         if bp.has_attribute('is_invincible'):
             bp.set_attribute('is_invincible', 'false')
-        actor = world.try_spawn_actor(bp, carla.Transform(loc))
-        if actor:
-            ped_actors.append(actor)
+        batch.append(carla.command.SpawnActor(bp, trans))
+
+    results   = client.apply_batch_sync(batch, True)
+    ped_ids   = [r.actor_id for r in results if not r.error]
+    print(f"  spawned {len(ped_ids)} pedestrian bodies")
 
     world.tick()
 
-    # attach AI controllers
-    for ped in ped_actors:
-        ctrl = world.try_spawn_actor(
-            controller_bp,
-            carla.Transform(),
-            attach_to=ped
+    # 3. batch spawn controllers attached to pedestrians
+    batch = []
+    for pid in ped_ids:
+        batch.append(
+            carla.command.SpawnActor(controller_bp, carla.Transform(), pid)
         )
-        if ctrl:
-            ctrl_actors.append(ctrl)
+    results  = client.apply_batch_sync(batch, True)
+    ctrl_ids = [r.actor_id for r in results if not r.error]
 
     world.tick()
 
-    # start walking
-    for ctrl in ctrl_actors:
-        ctrl.start()
-        dest = world.get_random_location_from_navigation()
-        if dest:
-            ctrl.go_to_location(dest)
-        ctrl.set_max_speed(1.4)
+    # 4. start controllers walking to random destinations
+    all_actors = world.get_actors(ped_ids + ctrl_ids)
+    for actor in all_actors:
+        if 'controller' in actor.type_id:
+            actor.start()
+            dest = world.get_random_location_from_navigation()
+            if dest:
+                actor.go_to_location(dest)
+            actor.set_max_speed(1.4)
 
-    all_actors = ped_actors + ctrl_actors
-    print(f"Spawned {len(ped_actors)} pedestrians")
-    return all_actors
+    print(f"Spawned {len(ped_ids)} pedestrians with controllers")
+    return list(all_actors)
+
+
 
 def cleanup(world, original_settings, sensors, actors, vehicle):
     """

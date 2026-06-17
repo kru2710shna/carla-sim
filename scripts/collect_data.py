@@ -129,7 +129,8 @@ def run(scenario_name):
 
         # 5. spawn traffic off-route
         actors  = spawn_npc_vehicles(client, world, count=preset["traffic"])
-        actors += spawn_pedestrians(world, count=preset["pedestrians"])
+        # actors += spawn_pedestrians(world, count=preset["pedestrians"])
+        actors += spawn_pedestrians(world, client, count=preset["pedestrians"])
 
         # 6. attach all 4 sensors
         camera = attach_rgb_camera(world, vehicle,
@@ -219,6 +220,4 @@ if __name__ == "__main__":
             print(f"SCENARIO: {scenario.upper()}")
             print(f"{'='*60}")
             subprocess.run([sys.executable, __file__, scenario])
-            print("Waiting 15s before next scenario...")
             time.sleep(15)
-        print("\nALL SCENARIOS COMPLETE!")
