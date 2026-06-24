@@ -1,0 +1,21 @@
+{
+  "traffic sign": 857,
+  "car": 1919,
+  "pole": 892,
+  "fence": 470,
+  "sidewalk": 902,
+  "person": 1108,
+  "building": 895,
+  "sky": 764,
+  "vegetation": 862,
+  "wall": 345,
+  "terrain": 253,
+  "traffic light": 562,
+  "road": 895,
+  "truck": 547,
+  "motorcycle": 91,
+  "bicycle": 15,
+  "rider": 47,
+  "bus": 59,
+  "train": 10
+}
